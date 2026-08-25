@@ -1,12 +1,11 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const ngrok = require('@ngrok/ngrok'); // HTTPS Tunneling
+const { exec } = require('child_process');
 const TelegramBot = require('node-telegram-bot-api');
 
 // ----------------- ১. CONFIGURATION & SECRETS -----------------
 const MAIN_BOT_TOKEN = process.env.BOT_TOKEN;
-const NGROK_AUTHTOKEN = process.env.NGROK_AUTHTOKEN; // Optional but recommended
 
 if (!MAIN_BOT_TOKEN) {
     console.error("❌ ERROR: BOT_TOKEN পাওয়া যায়নি!");
@@ -87,47 +86,58 @@ app.get('/app/:userId', (req, res) => {
     res.send(generatedHTML);
 });
 
-// ----------------- ৪. HTTPS PORT FORWARDING (NGROK) -----------------
-async function startPortForwarding() {
-    try {
-        const listener = await ngrok.forward({
-            addr: PORT,
-            authtoken: NGROK_AUTHTOKEN || undefined
-        });
+// ----------------- ৪. NO-AUTH HTTPS PORT FORWARDING (PINGGY) -----------------
+function startPinggyTunnel() {
+    const pinggyCmd = `ssh -p 443 -R0:localhost:${PORT} -o StrictHostKeyChecking=no -o ServerAliveInterval=30 a.pinggy.io`;
+    
+    const tunnelProcess = exec(pinggyCmd);
 
-        globalPublicUrl = listener.url(); // Automatically generates https:// URL
+    tunnelProcess.stdout.on('data', (data) => {
+        const match = data.match(/https:\/\/[a-zA-Z0-9-]+\.a\.pinggy\.link/);
+        if (match && !globalPublicUrl) {
+            globalPublicUrl = match[0];
+            console.log("\n==================================================");
+            console.log("🌐 Free HTTPS Tunnel Active: " + globalPublicUrl);
+            console.log("==================================================\n");
+        }
+    });
 
-        console.log("\n==================================================");
-        console.log("🌐 HTTPS Port Forwarding Active: " + globalPublicUrl);
-        console.log("==================================================\n");
+    tunnelProcess.stderr.on('data', (data) => {
+        const match = data.match(/https:\/\/[a-zA-Z0-9-]+\.a\.pinggy\.link/);
+        if (match && !globalPublicUrl) {
+            globalPublicUrl = match[0];
+            console.log("\n==================================================");
+            console.log("🌐 Free HTTPS Tunnel Active: " + globalPublicUrl);
+            console.log("==================================================\n");
+        }
+    });
 
-    } catch (err) {
-        console.error('⚠️ Port Forwarding Error:', err);
-        setTimeout(startPortForwarding, 5000);
-    }
+    tunnelProcess.on('close', () => {
+        console.warn('⚠️ Tunnel বিচ্ছিন্ন হয়েছে! ৩ সেকেন্ড পর আবার সংযোগ করা হচ্ছে...');
+        globalPublicUrl = '';
+        setTimeout(startPinggyTunnel, 3000);
+    });
 }
 
 app.listen(PORT, () => {
     console.log("Server running on port " + PORT);
-    startPortForwarding();
+    startPinggyTunnel();
 });
 
 // ----------------- ৫. TELEGRAM BOT LOGIC & REMOVE SYSTEM -----------------
 const bot = new TelegramBot(MAIN_BOT_TOKEN, { polling: true });
 
-// Start Command
 bot.onText(/\/start/, (msg) => {
     bot.sendMessage(
         msg.chat.id,
         '👋 **স্বাগতম!**\n\n' +
         '• প্রজেক্ট যোগ করতে: আপনার টোকেনটি সরাসরি মেসেজ করুন।\n' +
-        '• প্রজেক্ট ডিলিট করতে: /remove লিখে পাঠাতুন।\n' +
+        '• প্রজেক্ট ডিলিট করতে: /remove লিখে পাঠান।\n' +
         '• স্ট্যাটাস দেখতে: /myproject লিখে পাঠান।',
         { parse_mode: 'Markdown' }
     );
 });
 
-// Remove Command
 bot.onText(/\/remove/, (msg) => {
     const userId = msg.from.id;
     db = loadData();
@@ -148,7 +158,6 @@ bot.onText(/\/remove/, (msg) => {
     });
 });
 
-// My Project Command
 bot.onText(/\/myproject/, (msg) => {
     const userId = msg.from.id;
     db = loadData();
@@ -167,7 +176,6 @@ bot.onText(/\/myproject/, (msg) => {
     );
 });
 
-// Inline Keyboard Response Handling
 bot.on('callback_query', (query) => {
     const userId = query.from.id;
     const chatId = query.message.chat.id;
@@ -185,7 +193,6 @@ bot.on('callback_query', (query) => {
     }
 });
 
-// Token Input Handling
 bot.on('message', (msg) => {
     if (msg.text && msg.text.startsWith('/')) return;
 
