@@ -12,12 +12,7 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
-- name: Run Bot Script
-        env:
-          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
-        run: node index.js
-        
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
@@ -29,6 +24,7 @@ jobs:
       - name: Run Bot Script
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          NGROK_AUTHTOKEN: ${{ secrets.NGROK_AUTHTOKEN }}
         run: node index.js
 
       - name: Save Database Changes
