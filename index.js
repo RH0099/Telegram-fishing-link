@@ -1,39 +1,10 @@
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-
-// ----------------- ১. প্রয়োজনীয় প্যাকেজ অটো-ইনস্টলেশন (নিরাপদ উপায়) -----------------
-const requiredModules = ['node-telegram-bot-api', 'express', 'localtunnel'];
-let missingModules = false;
-
-requiredModules.forEach(mod => {
-    try {
-        require.resolve(mod);
-    } catch (e) {
-        missingModules = true;
-    }
-});
-
-if (missingModules) {
-    console.log("Installing required dependencies...");
-    try {
-        execSync('npm install node-telegram-bot-api express localtunnel', { stdio: 'inherit' });
-        console.log("All dependencies installed successfully!\n");
-    } catch (error) {
-        console.error("Failed to install packages:", error);
-        process.exit(1);
-    }
-}
-
-// ----------------- ২. প্যাকেজ ইমপোর্ট (FIXED CONSTRUCTOR ERROR) -----------------
-const TelegramBotImport = require('node-telegram-bot-api');
-// Constructor handling (কখনো default অবজেক্ট থাকলে তা সঠিকভাবে হ্যান্ডেল করার জন্য)
-const TelegramBot = TelegramBotImport.default || TelegramBotImport;
-
 const express = require('express');
 const localtunnel = require('localtunnel');
+const TelegramBot = require('node-telegram-bot-api');
 
-// ----------------- ৩. GITHUB SECRETS ও কনফিগারেশন -----------------
+// ----------------- ১. GITHUB SECRETS ও কনফিগারেশন -----------------
 const MAIN_BOT_TOKEN = process.env.BOT_TOKEN;
 
 if (!MAIN_BOT_TOKEN) {
@@ -49,7 +20,7 @@ const DB_FILE = path.join(__dirname, 'database.json');
 let globalPublicUrl = '';
 let tunnelInstance = null;
 
-// ----------------- ৪. ফাইল ডেটাবেস (Zero Data Loss) -----------------
+// ----------------- ২. ফাইল ডেটাবেস (Zero Data Loss) -----------------
 function loadData() {
     if (!fs.existsSync(DB_FILE)) {
         fs.writeFileSync(DB_FILE, JSON.stringify({ userTokens: {}, usageCount: {} }, null, 2));
@@ -68,7 +39,7 @@ function saveData(data) {
 
 let db = loadData();
 
-// ----------------- ৫. EXPRESS WEB SERVER SETUP -----------------
+// ----------------- ৩. EXPRESS WEB SERVER SETUP -----------------
 const app = express();
 app.use(express.json());
 
@@ -116,7 +87,7 @@ app.get('/app/:userId', (req, res) => {
     res.send(generatedHTML);
 });
 
-// ----------------- ৬. AUTO-FIX LOCALTUNNEL SYSTEM -----------------
+// ----------------- ৪. AUTO-FIX LOCALTUNNEL SYSTEM -----------------
 async function startTunnel() {
     try {
         tunnelInstance = await localtunnel({ port: PORT });
@@ -147,7 +118,7 @@ app.listen(PORT, () => {
     startTunnel();
 });
 
-// ----------------- ৭. TELEGRAM BOT LOGIC -----------------
+// ----------------- ৫. TELEGRAM BOT LOGIC -----------------
 const bot = new TelegramBot(MAIN_BOT_TOKEN, { polling: true });
 
 bot.onText(/\/start/, (msg) => {
