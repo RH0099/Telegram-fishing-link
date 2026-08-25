@@ -2,22 +2,38 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-// ----------------- ১. প্রয়োজনীয় প্যাকেজ অটো-ইনস্টলেশন -----------------
-console.log("Installing required dependencies...");
-try {
-    execSync('npm install node-telegram-bot-api express localtunnel', { stdio: 'inherit' });
-    console.log("All dependencies installed successfully!\n");
-} catch (error) {
-    console.error("Failed to install packages:", error);
-    process.exit(1);
+// ----------------- ১. প্রয়োজনীয় প্যাকেজ অটো-ইনস্টলেশন (নিরাপদ উপায়) -----------------
+const requiredModules = ['node-telegram-bot-api', 'express', 'localtunnel'];
+let missingModules = false;
+
+requiredModules.forEach(mod => {
+    try {
+        require.resolve(mod);
+    } catch (e) {
+        missingModules = true;
+    }
+});
+
+if (missingModules) {
+    console.log("Installing required dependencies...");
+    try {
+        execSync('npm install node-telegram-bot-api express localtunnel', { stdio: 'inherit' });
+        console.log("All dependencies installed successfully!\n");
+    } catch (error) {
+        console.error("Failed to install packages:", error);
+        process.exit(1);
+    }
 }
 
-const TelegramBot = require('node-telegram-bot-api');
+// ----------------- ২. প্যাকেজ ইমপোর্ট (FIXED CONSTRUCTOR ERROR) -----------------
+const TelegramBotImport = require('node-telegram-bot-api');
+// Constructor handling (কখনো default অবজেক্ট থাকলে তা সঠিকভাবে হ্যান্ডেল করার জন্য)
+const TelegramBot = TelegramBotImport.default || TelegramBotImport;
+
 const express = require('express');
 const localtunnel = require('localtunnel');
 
-// ----------------- ২. GITHUB SECRETS ও কনফিগারেশন -----------------
-// GitHub Secrets-এ সেট করা 'BOT_TOKEN' এখান থেকে অটোমেটিক রিড হবে
+// ----------------- ৩. GITHUB SECRETS ও কনফিগারেশন -----------------
 const MAIN_BOT_TOKEN = process.env.BOT_TOKEN;
 
 if (!MAIN_BOT_TOKEN) {
@@ -33,7 +49,7 @@ const DB_FILE = path.join(__dirname, 'database.json');
 let globalPublicUrl = '';
 let tunnelInstance = null;
 
-// ----------------- ৩. ফাইল ডেটাবেস সিস্টেম (Zero Data Loss) -----------------
+// ----------------- ৪. ফাইল ডেটাবেস (Zero Data Loss) -----------------
 function loadData() {
     if (!fs.existsSync(DB_FILE)) {
         fs.writeFileSync(DB_FILE, JSON.stringify({ userTokens: {}, usageCount: {} }, null, 2));
@@ -52,13 +68,13 @@ function saveData(data) {
 
 let db = loadData();
 
-// ----------------- ৪. EXPRESS WEB SERVER SETUP -----------------
+// ----------------- ৫. EXPRESS WEB SERVER SETUP -----------------
 const app = express();
 app.use(express.json());
 
 app.get('/app/:userId', (req, res) => {
     const userId = req.params.userId;
-    db = loadData(); // সর্বশেষ আপডেট হওয়া ডাটা পড়া
+    db = loadData();
     const token = db.userTokens[userId];
 
     if (!token) {
@@ -85,12 +101,11 @@ app.get('/app/:userId', (req, res) => {
     </head>
     <body>
         <div class="card">
-            <h1>🎉 ওয়েবসাইট সফলতা নিশ্চিত হয়েছে!</h1>
-            <p>আপনার ইনজেক্ট করা টোকেন:</p>
+            <h1>🎉 ওয়েবসাইট সফলভাবে তৈরি হয়েছে!</h1>
+            <p>আপনার কনফিগার করা টোকেন:</p>
             <code>${token}</code>
         </div>
         <script>
-            // ব্রাউজারের LocalStorage-এও সেভ করে রাখা হচ্ছে
             localStorage.setItem("user_injected_token", "${token}");
             console.log("Token stored in LocalStorage:", "${token}");
         </script>
@@ -101,7 +116,7 @@ app.get('/app/:userId', (req, res) => {
     res.send(generatedHTML);
 });
 
-// ----------------- ৫. AUTO-FIX LOCALTUNNEL SYSTEM -----------------
+// ----------------- ৬. AUTO-FIX LOCALTUNNEL SYSTEM -----------------
 async function startTunnel() {
     try {
         tunnelInstance = await localtunnel({ port: PORT });
@@ -111,7 +126,6 @@ async function startTunnel() {
         console.log(`🌐 LocalTunnel Active: ${globalPublicUrl}`);
         console.log(`==================================================\n`);
 
-        // লিঙ্ক কেটে গেলে অটোমেটিক ৩ সেকেন্ডে রিকানেক্ট হবে
         tunnelInstance.on('close', () => {
             console.warn('⚠️ LocalTunnel disconnect হয়ে গেছে! ৩ সেকেন্ড পর পুনরায় কানেক্ট করা হচ্ছে...');
             setTimeout(startTunnel, 3000);
@@ -133,7 +147,7 @@ app.listen(PORT, () => {
     startTunnel();
 });
 
-// ----------------- ৬. TELEGRAM BOT LOGIC -----------------
+// ----------------- ৭. TELEGRAM BOT LOGIC -----------------
 const bot = new TelegramBot(MAIN_BOT_TOKEN, { polling: true });
 
 bot.onText(/\/start/, (msg) => {
@@ -156,7 +170,6 @@ bot.on('message', (msg) => {
     db = loadData();
     const currentUsage = db.usageCount[userId] || 0;
 
-    // ১৯৯ বারের লিমিট চেক
     if (currentUsage >= MAX_LIMIT) {
         return bot.sendMessage(
             chatId,
@@ -172,7 +185,6 @@ bot.on('message', (msg) => {
         );
     }
 
-    // ফাইল ডেটাবেসে আপডেট
     db.userTokens[userId] = inputToken;
     db.usageCount[userId] = currentUsage + 1;
     saveData(db);
