@@ -1,15 +1,15 @@
 const fs = require('fs');
 const path = require('path');
 const express = require('express');
-const localtunnel = require('localtunnel');
+const ngrok = require('@ngrok/ngrok'); // HTTPS Tunneling
 const TelegramBot = require('node-telegram-bot-api');
 
-// ----------------- ১. GITHUB SECRETS ও কনফিগারেশন -----------------
+// ----------------- ১. CONFIGURATION & SECRETS -----------------
 const MAIN_BOT_TOKEN = process.env.BOT_TOKEN;
+const NGROK_AUTHTOKEN = process.env.NGROK_AUTHTOKEN; // Optional but recommended
 
 if (!MAIN_BOT_TOKEN) {
     console.error("❌ ERROR: BOT_TOKEN পাওয়া যায়নি!");
-    console.error("দয়া করে GitHub Repository Settings > Secrets and variables > Actions-এ গিয়ে 'BOT_TOKEN' যোগ করুন।");
     process.exit(1);
 }
 
@@ -18,9 +18,8 @@ const MAX_LIMIT = 199;
 const DB_FILE = path.join(__dirname, 'database.json');
 
 let globalPublicUrl = '';
-let tunnelInstance = null;
 
-// ----------------- ২. ফাইল ডেটাবেস (Zero Data Loss) -----------------
+// ----------------- ২. DATABASE MANAGEMENT -----------------
 function loadData() {
     if (!fs.existsSync(DB_FILE)) {
         fs.writeFileSync(DB_FILE, JSON.stringify({ userTokens: {}, usageCount: {} }, null, 2));
@@ -39,7 +38,7 @@ function saveData(data) {
 
 let db = loadData();
 
-// ----------------- ৩. EXPRESS WEB SERVER SETUP -----------------
+// ----------------- ৩. EXPRESS WEB SERVER -----------------
 const app = express();
 app.use(express.json());
 
@@ -51,47 +50,35 @@ app.get('/app/:userId', (req, res) => {
     if (!token) {
         return res.status(404).send(`
             <h2 style="color:red; font-family:sans-serif; text-align:center; margin-top:50px;">
-                ❌ লিঙ্কটি পাওয়া যায়নি অথবা টোকেন ভ্যালিড নয়!
+                ❌ লিঙ্কটি অ্যাক্টিভ নেই অথবা প্রজেক্টটি রিমুভ করা হয়েছে!
             </h2>
         `);
     }
 
-    // Fixed: Template literal conflict inside HTML/JS script
     const generatedHTML = `
     <!DOCTYPE html>
     <html lang="bn">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Token Web App</title>
+        <title>HTTPS Web App Target</title>
         <style>
             body { font-family: Arial, sans-serif; background: #0f172a; color: #fff; text-align: center; padding: 50px; }
             .card { background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
             h1 { color: #38bdf8; }
             code { background: #334155; padding: 8px 12px; border-radius: 4px; color: #a7f3d0; font-size: 16px; word-break: break-all; }
-            .console-box { margin-top: 20px; background: #000; padding: 15px; border-radius: 8px; text-align: left; font-family: monospace; }
+            .badge { background: #22c55e; color: #fff; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
         </style>
     </head>
     <body>
         <div class="card">
-            <h1>🎉 ওয়েবসাইট সফলভাবে তৈরি হয়েছে!</h1>
-            <p>আপনার কনফিগার করা টোকেন:</p>
+            <h1>🔒 HTTPS Secure Portal</h1>
+            <p><span class="badge">SSL ACTIVE</span></p>
+            <p>আপনার সক্রিয় টোকেন:</p>
             <code>${token}</code>
-            <div class="console-box" id="console"></div>
         </div>
         <script>
             localStorage.setItem("user_injected_token", "${token}");
-            
-            function logToConsole(text) {
-                var consoleBox = document.getElementById('console');
-                if (consoleBox) {
-                    var line = document.createElement('div');
-                    line.innerText = "> " + text;
-                    consoleBox.appendChild(line);
-                }
-            }
-
-            logToConsole("Token stored in LocalStorage: ${token}");
         </script>
     </body>
     </html>
@@ -100,50 +87,105 @@ app.get('/app/:userId', (req, res) => {
     res.send(generatedHTML);
 });
 
-// ----------------- ৪. AUTO-FIX LOCALTUNNEL SYSTEM -----------------
-async function startTunnel() {
+// ----------------- ৪. HTTPS PORT FORWARDING (NGROK) -----------------
+async function startPortForwarding() {
     try {
-        tunnelInstance = await localtunnel({ port: PORT });
-        globalPublicUrl = tunnelInstance.url;
+        const listener = await ngrok.forward({
+            addr: PORT,
+            authtoken: NGROK_AUTHTOKEN || undefined
+        });
+
+        globalPublicUrl = listener.url(); // Automatically generates https:// URL
 
         console.log("\n==================================================");
-        console.log("🌐 LocalTunnel Active: " + globalPublicUrl);
+        console.log("🌐 HTTPS Port Forwarding Active: " + globalPublicUrl);
         console.log("==================================================\n");
 
-        tunnelInstance.on('close', () => {
-            console.warn('⚠️ LocalTunnel disconnect হয়ে গেছে! ৩ সেকেন্ড পর পুনরায় কানেক্ট করা হচ্ছে...');
-            setTimeout(startTunnel, 3000);
-        });
-
-        tunnelInstance.on('error', (err) => {
-            console.error('⚠️ LocalTunnel Error:', err);
-            try { tunnelInstance.close(); } catch(e){}
-        });
-
     } catch (err) {
-        console.error('⚠️ LocalTunnel চালু করা যায়নি। ৫ সেকেন্ড পর আবার চেষ্টা করা হচ্ছে...', err);
-        setTimeout(startTunnel, 5000);
+        console.error('⚠️ Port Forwarding Error:', err);
+        setTimeout(startPortForwarding, 5000);
     }
 }
 
 app.listen(PORT, () => {
-    console.log("Server started on port " + PORT);
-    startTunnel();
+    console.log("Server running on port " + PORT);
+    startPortForwarding();
 });
 
-// ----------------- ৫. TELEGRAM BOT LOGIC -----------------
+// ----------------- ৫. TELEGRAM BOT LOGIC & REMOVE SYSTEM -----------------
 const bot = new TelegramBot(MAIN_BOT_TOKEN, { polling: true });
 
+// Start Command
 bot.onText(/\/start/, (msg) => {
     bot.sendMessage(
         msg.chat.id,
         '👋 **স্বাগতম!**\n\n' +
-        'আপনার টেলিগ্রাম বট টোকেনটি এখানে মেসেজ হিসেবে পাঠান।\n' +
-        'টোকেন পাঠালে সিস্টেমে অ্যাড করে একটি ওয়ার্ল্ডওয়াইড এক্সেসযোগ্য লিঙ্ক দেওয়া হবে।',
+        '• প্রজেক্ট যোগ করতে: আপনার টোকেনটি সরাসরি মেসেজ করুন।\n' +
+        '• প্রজেক্ট ডিলিট করতে: /remove লিখে পাঠাতুন।\n' +
+        '• স্ট্যাটাস দেখতে: /myproject লিখে পাঠান।',
         { parse_mode: 'Markdown' }
     );
 });
 
+// Remove Command
+bot.onText(/\/remove/, (msg) => {
+    const userId = msg.from.id;
+    db = loadData();
+
+    if (!db.userTokens[userId]) {
+        return bot.sendMessage(msg.chat.id, '❌ আপনার কোনো সক্রিয় প্রজেক্ট বা লিঙ্ক খুঁজে পাওয়া যায়নি!');
+    }
+
+    bot.sendMessage(msg.chat.id, '⚠️ আপনি কি নিশ্চিতভাবে আপনার বর্তমান প্রজেক্টটি মুছে ফেলতে চান?', {
+        reply_markup: {
+            inline_keyboard: [
+                [
+                    { text: '🗑️ হ্যাঁ, রিমুভ করুন', callback_data: 'confirm_remove' },
+                    { text: '❌ বাতিল', callback_data: 'cancel_remove' }
+                ]
+            ]
+        }
+    });
+});
+
+// My Project Command
+bot.onText(/\/myproject/, (msg) => {
+    const userId = msg.from.id;
+    db = loadData();
+
+    if (!db.userTokens[userId]) {
+        return bot.sendMessage(msg.chat.id, 'ℹ️ আপনার কোনো প্রজেক্ট যোগ করা নেই। টোকেন পাঠিয়ে নতুন প্রজেক্ট তৈরি করুন।');
+    }
+
+    const projectUrl = globalPublicUrl + "/app/" + userId;
+    bot.sendMessage(
+        msg.chat.id,
+        `📌 **আপনার বর্তমান প্রজেক্ট:**\n\n` +
+        `🌐 **HTTPS Link:**\n${projectUrl}\n\n` +
+        `🔑 **Token:** \`${db.userTokens[userId]}\``,
+        { parse_mode: 'Markdown' }
+    );
+});
+
+// Inline Keyboard Response Handling
+bot.on('callback_query', (query) => {
+    const userId = query.from.id;
+    const chatId = query.message.chat.id;
+
+    if (query.data === 'confirm_remove') {
+        db = loadData();
+        delete db.userTokens[userId];
+        saveData(db);
+
+        bot.answerCallbackQuery(query.id, { text: 'প্রজেক্ট মুছে ফেলা হয়েছে!' });
+        bot.sendMessage(chatId, '✅ **আপনার প্রজেক্ট এবং লিঙ্কটি সফলভাবে রিমুভ করা হয়েছে।**');
+    } else if (query.data === 'cancel_remove') {
+        bot.answerCallbackQuery(query.id, { text: 'বাতিল করা হয়েছে' });
+        bot.sendMessage(chatId, '👍 প্রজেক্ট রিমুভ করার প্রক্রিয়া বাতিল করা হলো।');
+    }
+});
+
+// Token Input Handling
 bot.on('message', (msg) => {
     if (msg.text && msg.text.startsWith('/')) return;
 
@@ -155,18 +197,11 @@ bot.on('message', (msg) => {
     const currentUsage = db.usageCount[userId] || 0;
 
     if (currentUsage >= MAX_LIMIT) {
-        return bot.sendMessage(
-            chatId,
-            '❌ **দুঃখিত!** আপনার ১৯৯ বারের ফ্রি ব্যবহারের লিমিট শেষ হয়ে গেছে।',
-            { parse_mode: 'Markdown' }
-        );
+        return bot.sendMessage(chatId, '❌ **দুঃখিত!** আপনার ব্যবহারের লিমিট শেষ হয়ে গেছে।', { parse_mode: 'Markdown' });
     }
 
     if (!globalPublicUrl) {
-        return bot.sendMessage(
-            chatId,
-            '⚠️ সার্ভার কানেকশন তৈরি হচ্ছে, অনুগ্রহ করে ৫ সেকেন্ড পর আবার চেষ্টা করুন।'
-        );
+        return bot.sendMessage(chatId, '⚠️ HTTPS tunnel প্রস্তুত হচ্ছে, অনুগ্রহ করে ৫ সেকেন্ড পর চেষ্টা করুন।');
     }
 
     db.userTokens[userId] = inputToken;
@@ -176,9 +211,10 @@ bot.on('message', (msg) => {
     const finalUrl = globalPublicUrl + "/app/" + userId;
 
     const responseMsg = 
-        "✅ **আপনার টোকেন সফলভাবে যুক্ত হয়েছে!**\n\n" +
-        "🌐 **আপনার এক্সেস লিঙ্ক:**\n" + finalUrl + "\n\n" +
-        "📊 **ব্যবহৃত হয়েছে:** " + db.usageCount[userId] + " / " + MAX_LIMIT + " বার।";
+        "✅ **নতুন প্রজেক্ট তৈরি হয়েছে! (HTTPS Secure)**\n\n" +
+        "🌐 **এক্সেস লিঙ্ক:**\n" + finalUrl + "\n\n" +
+        "⚙️ **ম্যানেজমেন্ট:**\n" +
+        "• প্রজেক্ট রিমুভ করতে /remove লিখে পাঠান।";
 
     bot.sendMessage(chatId, responseMsg, { parse_mode: 'Markdown' });
 });
