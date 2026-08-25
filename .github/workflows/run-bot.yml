@@ -1,0 +1,33 @@
+name: Run Telegram Bot Service
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */5 * * *'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Run Bot Script
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+        run: node index.js
+
+      - name: Save Database Changes
+        if: always()
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "actions@github.com"
+          git add database.json
+          git commit -m "Auto-update database.json [skip ci]" || exit 0
+          git push
